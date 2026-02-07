@@ -1,0 +1,178 @@
+---
+title: "Netflix Content Analysis"
+author: "Jasmyne Walker"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+## 1) Load packages
+
+```{r}
+# Install once if needed (uncomment if packages are missing)
+# install.packages(c("readxl","dplyr","ggplot2","janitor","lubridate","stringr","scales"))
+
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(janitor)
+library(lubridate)
+library(stringr)
+library(scales)
+```
+
+## 2) Import the Excel file
+
+This report expects **netflix_titles.xlsx** to be in the **same folder** as this Rmd file.
+
+```{r}
+file_name <- "netflix_titles.xlsx"
+
+if (!file.exists(file_name)) {
+  stop(paste(
+    "I can't find", file_name, "in this folder.",
+    "Put netflix_titles.xlsx in the same folder as this .Rmd,",
+    "or change file_name to the full file path."
+  ))
+}
+
+# Read the main sheet
+netflix <- read_excel(file_name, sheet = "netflix_titles") %>%
+  clean_names()  # makes names lowercase_with_underscores
+
+# Quick glance
+glimpse(netflix)
+```
+
+## 3) Basic data checks
+
+```{r}
+# Confirm expected columns exist (helps prevent 'object not found' errors)
+expected_cols <- c("type","title","date_added","release_year","rating","duration_minutes","duration_seasons","show_id")
+
+missing_cols <- setdiff(expected_cols, names(netflix))
+if (length(missing_cols) > 0) {
+  stop(paste("Missing expected columns:", paste(missing_cols, collapse = ", ")))
+}
+
+summary(select(netflix, any_of(expected_cols)))
+```
+
+## 4) Clean + create a few helper fields
+
+```{r}
+netflix_clean <- netflix %>%
+  mutate(
+    type = as.factor(type),
+    rating = as.factor(rating),
+    release_year = as.integer(release_year),
+    # Some rows may have missing date_added; keep it safe
+    date_added = suppressWarnings(as.Date(date_added)),
+    added_year = year(date_added)
+  )
+
+# Quick counts
+count(netflix_clean, type)
+```
+
+## 5) Content growth over time (Release Year)
+
+**Question:** How has the number of titles changed over time?
+
+```{r}
+titles_by_year <- netflix_clean %>%
+  filter(!is.na(release_year)) %>%
+  count(release_year, type) %>%
+  arrange(release_year)
+
+ggplot(titles_by_year, aes(x = release_year, y = n, group = type, color = type)) +
+  geom_line(linewidth = 1) +
+  labs(
+    title = "Netflix Titles by Release Year (Movies vs TV Shows)",
+    x = "Release Year",
+    y = "Number of Titles",
+    color = "Type"
+  ) +
+  theme_minimal()
+```
+
+## 6) Most common ratings (bar chart)
+
+```{r}
+top_ratings <- netflix_clean %>%
+  filter(!is.na(rating)) %>%
+  count(rating, sort = TRUE)
+
+ggplot(top_ratings, aes(x = reorder(rating, n), y = n)) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Count of Titles by Rating",
+    x = "Rating",
+    y = "Number of Titles"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(labels = comma)
+```
+
+## 7) Movie duration distribution (histogram)
+
+```{r}
+movies <- netflix_clean %>%
+  filter(type == "Movie", !is.na(duration_minutes))
+
+ggplot(movies, aes(x = duration_minutes)) +
+  geom_histogram(binwidth = 10) +
+  labs(
+    title = "Distribution of Netflix Movie Durations",
+    x = "Duration (Minutes)",
+    y = "Number of Movies"
+  ) +
+  theme_minimal()
+```
+
+## 8) TV show seasons distribution (histogram)
+
+```{r}
+tv_shows <- netflix_clean %>%
+  filter(type == "TV Show", !is.na(duration_seasons))
+
+ggplot(tv_shows, aes(x = duration_seasons)) +
+  geom_histogram(binwidth = 1) +
+  labs(
+    title = "Distribution of Netflix TV Show Seasons",
+    x = "Number of Seasons",
+    y = "Number of TV Shows"
+  ) +
+  theme_minimal()
+```
+
+## 9) Quick takeaways (auto-generated)
+
+```{r}
+movie_med <- median(movies$duration_minutes, na.rm = TRUE)
+movie_iqr <- IQR(movies$duration_minutes, na.rm = TRUE)
+
+tv_med <- median(tv_shows$duration_seasons, na.rm = TRUE)
+tv_iqr <- IQR(tv_shows$duration_seasons, na.rm = TRUE)
+
+cat(paste0(
+  "- Median movie length: **", movie_med, " minutes** (IQR: ", movie_iqr, ")
+",
+  "- Median TV show length: **", tv_med, " season(s)** (IQR: ", tv_iqr, ")
+",
+  "- Most common rating: **", as.character(top_ratings$rating[1]), "**
+"
+))
+```
